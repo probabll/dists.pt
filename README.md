@@ -17,6 +17,6 @@ Though the history of commits won't show this code base received contributions f
 
 # Citation
 
-If you use HardKumaraswamy please refer to this paper:
+If you use HardKumaraswamy please cite this paper:
 
 * [Joost Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://arxiv.org/pdf/1905.08160.pdf)

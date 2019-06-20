@@ -8,7 +8,15 @@ Sparse distributions for pytorch:
 
 # Contributors
 
+Though the history of commits won't show this code base received contributions from:
+
 * [Nicola De Cao](https://github.com/nicola-decao)
 * [Joost Bastings](https://github.com/bastings)
 * [Bryan Eikema](https://github.com/roxot)
 * [Wilker Aziz](https://github.com/wilkeraziz)
+
+# Citation
+
+If you use HardKumaraswamy please refer to this paper:
+
+* [Joost Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://arxiv.org/pdf/1905.08160.pdf)

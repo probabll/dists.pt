@@ -61,13 +61,13 @@ class StretchedAndRectifiedDistribution(torch.distributions.Distribution):
         zeros = torch.zeros_like(value)
         log_p = torch.where(value == zeros,
                             #torch.log(self.base.cdf((value - self.loc) / self.scale)),
-                            torch.log(self.stretched.cdf(zeros)),
+                            torch.log(torch.clamp(self.stretched.cdf(zeros), min=EPS)),
                             self.stretched.log_prob(value))
         
         # log_q(x==1) = 1 - cdf_p(1)
         ones = torch.ones_like(value)
         log_p = torch.where(value == ones,
-                            torch.log(1 - self.stretched.cdf(ones)),
+                            torch.log(torch.clamp(1 - self.stretched.cdf(ones), min=EPS)),
                             log_p)
         
         return log_p

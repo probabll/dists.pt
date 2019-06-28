@@ -99,8 +99,11 @@ class Kumaraswamy(TransformedDistribution):
         # U ~ Uniform(cdf(k0), cdf(k1)) 
         # K = F^-1(U)
         #  simulates K over the truncated support (k0,k1)
-        x = Uniform(self.cdf(torch.full_like(self.a, k0)), 
-                    self.cdf(torch.full_like(self.b, k1))).rsample(sample_shape)
+        
+        l_b = torch.clamp(self.cdf(torch.full_like(self.a, k0)), min=EPS)
+        h_b = torch.clamp(self.cdf(torch.full_like(self.b, k1)), max=(1 - EPS*10))
+        
+        x = Uniform(l_b, h_b).rsample(sample_shape)
         for transform in self.transforms:
             x = transform(x)
         return x

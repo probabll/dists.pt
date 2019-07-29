@@ -19,4 +19,4 @@ Though the history of commits won't show this code base received contributions f
 
 If you use HardKumaraswamy please cite this paper:
 
-* [Joost Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://arxiv.org/pdf/1905.08160.pdf)
+* [Joost Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://www.aclweb.org/anthology/P19-1284)

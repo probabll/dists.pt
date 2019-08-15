@@ -16,9 +16,9 @@ from torch.distributions.utils import broadcast_all
 from torch.distributions.kl import register_kl, kl_divergence
 import torch.nn.functional as F
 from torch.distributions.utils import probs_to_logits, logits_to_probs
-from bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
+from .bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
 
-EPS = 1e-5
+EPS = 1e-4
 
 class D01C01:
     """
@@ -42,18 +42,18 @@ class D01C01:
         if not (isinstance(p, D01C01) or isinstance(q, D01C01)):
             raise ValueError("p and q must mix delta(x), delta(1-x), and a density over (0, 1)")
 
-        kl = p.p0 * (p.log_p0 - q.log_p0)     
-        kl = kl + p.p1 * (p.log_p1 - q.log_p1)
-        kl = kl + p.pc * (p.log_pc - q.log_pc)
+        kl0 = p.p0 * (p.log_p0 - q.log_p0)     
+        kl1 = p.p1 * (p.log_p1 - q.log_p1)
+        klc = p.pc * (p.log_pc - q.log_pc)
         # Here we estimate the last term by sampling in the continuous support (0, 1)
         x = p.cont.rsample(sample_shape=torch.Size([n_samples]))
         if exact_entropy:
             H = p.cont.entropy()
         else:            
-            H = - p.cont.log_prob(x).mean(0)    
+            H = - p.cont.log_prob(x).mean(0)
         C = - q.cont.log_prob(x).mean(0)
-        kl = kl + p.pc * (-H + C)    
-        return kl   
+        klf = p.pc * (-H + C)
+        return kl0 + kl1 + klc + klf
 
     
 @register_kl(D01C01, D01C01)
@@ -154,11 +154,11 @@ class Truncated01(Distribution):
             validate_args=validate_args)
         
         self.base = base
-        self._base_cdf0 = self.base.cdf(torch.zeros(1))
-        self._normaliser = self.base.cdf(torch.ones(1)) - self._base_cdf0
         # this is used to get the shape and device of the base
         x = self.base.sample()
-        self._uniform = Uniform(torch.zeros_like(x), torch.ones_like(x))
+        self._base_cdf0 = self.base.cdf(torch.zeros_like(x))
+        self._normaliser = torch.clamp(self.base.cdf(torch.ones_like(x)) - self._base_cdf0, min=EPS)
+        self._uniform = Uniform(torch.zeros_like(x) + EPS, torch.ones_like(x) - EPS)
     
     def log_prob(self, value):
         log_p = self.base.log_prob(value) - torch.log(self._normaliser)
@@ -167,6 +167,8 @@ class Truncated01(Distribution):
     
     def cdf(self, value):
         cdf = (self.base.cdf(value) - self._base_cdf0) / self._normaliser
+        cdf = torch.where(value < 0, torch.zeros_like(cdf), cdf)  # flat at zero for x < 0
+        cdf = torch.where(value > 1, torch.ones_like(cdf), cdf)   # flat at one for x > 1
         return torch.where((value < 0) + (value > 1), torch.zeros_like(cdf), cdf)
             
     def sample(self, sample_shape=torch.Size()):
@@ -176,10 +178,19 @@ class Truncated01(Distribution):
     def rsample(self, sample_shape=torch.Size()):        
         # Sample from a uniform distribution
         #  and transform it to the corresponding truncated uniform distribution
+        # Let F be the cdf of the base and I its inverse. Let G be the cdf of the truncated distribution and J its inverse. Let U be a uniform random variable over (0, 1).
+        # We can sample from the truncated distribution via
+        # X = I( F(0) + U * (F(1) - F(0)) )
+        # Proof:
+        #  Pr{ I( F(0) + U * (F(1) - F(0)) ) <= x }           Let's apply F to both sides of the inequality
+        #  = Pr{ F(0) + U*(F(1) - F(0) } <= F(x) }
+        #  = Pr{ U <= (F(x) - F(0))/(F(1)-F(0)) }             Note that the right-hand side corresponds to G(x)
+        #  = Pr{ U <= G(x) }                                  Now let's apply J to both sides
+        #  = Pr{ J(U) <= x }                                  Done!
         u = self._uniform.sample(sample_shape)
         u = self._base_cdf0 + u * self._normaliser
         # Map to sample space using the base's inverse cdf
-        return self.base.icdf(u)
+        return self.base.icdf(torch.clamp(u, min=EPS, max=1-EPS))
     
     
 class Rectified01(D01C01,Distribution):
@@ -198,9 +209,11 @@ class Rectified01(D01C01,Distribution):
             validate_args=validate_args)
         
         self.base = base
+        # this is used to get the shape and device of the base
+        x = self.base.sample()
         # How the mass is partitioned 
-        self.p0 = torch.clamp(self.base.cdf(torch.zeros(1)), min=EPS, max=1-EPS)
-        self.pc = torch.clamp(self.base.cdf(torch.ones(1)) - self.p0, min=EPS, max=1-EPS)
+        self.p0 = torch.clamp(self.base.cdf(torch.zeros_like(x)), min=EPS, max=1-EPS)
+        self.pc = torch.clamp(self.base.cdf(torch.ones_like(x)) - self.p0, min=EPS, max=1-EPS)
         self.p1 = torch.clamp(1 - self.p0 - self.pc, min=EPS, max=1-EPS)
         # Log probs
         self.log_p0 = torch.log(self.p0)
@@ -209,9 +222,7 @@ class Rectified01(D01C01,Distribution):
         
         self.cont = Truncated01(base)
         
-        # this is used to get the shape and device of the base
-        x = self.base.sample()
-        self._uniform = Uniform(torch.zeros_like(x), torch.ones_like(x))
+        self._uniform = Uniform(torch.zeros_like(x) + EPS, torch.ones_like(x) - EPS)
     
     def log_prob(self, value):
         # x \in (0, 1)
@@ -237,7 +248,8 @@ class Rectified01(D01C01,Distribution):
             self.base.cdf(value), 
             torch.ones_like(value)           # all of the mass
         )
-        cdf = torch.where((value < 0.) + (value > 1.), torch.zeros_like(cdf), cdf)
+        cdf = torch.where(value < 0., torch.zeros_like(cdf), cdf)
+        cdf = torch.where(value > 1., torch.ones_like(cdf), cdf)
         return cdf
             
     def sample(self, sample_shape=torch.Size()):

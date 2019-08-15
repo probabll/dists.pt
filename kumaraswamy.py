@@ -71,12 +71,18 @@ class Kumaraswamy(TransformedDistribution):
         return torch.log(self.a + EPS) + torch.log(self.b + EPS) + (self.a - 1) * torch.log(value + EPS) \
             + (self.b - 1) * torch.log(1 - value ** self.a + EPS)
 
-    def log_cdf(self, value):        
-        return torch.log(1. - (1. - value ** self.a + EPS) ** self.b + EPS) 
+    #def log_cdf(self, value):        
+    #    return torch.log(1. - (1. - value ** self.a + EPS) ** self.b + EPS) 
     
     def cdf(self, value):
-        return torch.exp(self.log_cdf(value))
-    
+        """
+        cdf: torch.exp(torch.log1p(-(1 - value ** self.a) ** self.b))
+        icdf: torch.exp(torch.log1p(-torch.exp(torch.log1p(-value) / self.b)) / self.a)
+        """
+        return torch.exp(torch.log1p(-(1 - value ** self.a) ** self.b))
+        #return torch.exp(self.log_cdf(torch.clamp(value, min=EPS, max=1-EPS)))
+
+
     @property
     def mean(self):
         return self._moment(1)

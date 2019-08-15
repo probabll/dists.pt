@@ -111,12 +111,15 @@ class MixtureD01C01(D01C01,Distribution):
         log_prob = self.log_pc + self.cont.log_prob(value)
         log_prob = torch.where(value == 0., self.log_p0, log_prob)
         log_prob = torch.where(value == 1., self.log_p1, log_prob)
+        log_prob = torch.where((value < 0.) + (value > 1.), torch.full_like(log_prob, float('-inf')), log_prob)
         return log_prob
 
     def cdf(self, value):
         cdf = self.p0 + self.pc * self.cont.cdf(value)
         cdf = torch.where(value == 0., self.p0, cdf)
         cdf = torch.where(value == 1., self.p0 + self.pc + self.p1, cdf)
+        cdf = torch.where(value < 0., torch.zeros_like(cdf), cdf)
+        cdf = torch.where(value > 1., torch.ones_like(cdf), cdf)
         return cdf
     
     
@@ -169,7 +172,7 @@ class Truncated01(Distribution):
         cdf = (self.base.cdf(value) - self._base_cdf0) / self._normaliser
         cdf = torch.where(value < 0, torch.zeros_like(cdf), cdf)  # flat at zero for x < 0
         cdf = torch.where(value > 1, torch.ones_like(cdf), cdf)   # flat at one for x > 1
-        return torch.where((value < 0) + (value > 1), torch.zeros_like(cdf), cdf)
+        return cdf
             
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():

@@ -1,12 +1,16 @@
 import torch
+from torch.distributions import Distribution
+from torch.distributions.uniform import Uniform
 from torch.distributions.kl import register_kl
 
 EPS = 1e-5
-
+    
+    
 def stretched_distribution(distribution, lower=-0.1, upper=1.1):
     assert lower < upper
     return torch.distributions.TransformedDistribution(distribution,
         torch.distributions.AffineTransform(loc=lower, scale=upper - lower))
+    
     
 class StretchedAndRectifiedDistribution(torch.distributions.Distribution):
     """  

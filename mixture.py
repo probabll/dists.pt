@@ -139,7 +139,7 @@ class MixtureD01C01(torch.distributions.Distribution):
     def cdf(self, value):
         cdf = self.p0 + self.pc * self.cont.cdf(value)
         cdf = torch.where(value == 0., self.p0, cdf)
-        cdf = torch.where(value == 1., self.p1, cdf)
+        cdf = torch.where(value == 1., self.p0 + self.pc + self.p1, cdf)
         return cdf
 
     def entropy(self):

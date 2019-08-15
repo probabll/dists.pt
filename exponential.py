@@ -56,3 +56,11 @@ def kl_righttruncexp_righttruncexp(p, q):
 @register_kl(RightTruncatedExponential, RightTruncatedExponential)
 def _kl(p, q):
     return kl_righttruncexp_righttruncexp(p, q)
+
+@register_kl(RightTruncatedExponential, Uniform)
+def _kl(p, q):
+    # E_p[log U] is a constant
+    #  the constant corresponds to 1 if U is U(0,1)
+    #  to be sure we compute it over the (0, 1) interval in terms of the Uniform's cdf
+    constant = - torch.log(q.cdf(1) - q.cdf(0))
+    return - p.entropy() - constant

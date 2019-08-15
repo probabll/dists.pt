@@ -140,3 +140,11 @@ def kl_kumaraswamy_beta(p, q, m=10):
 def _kl_kumaraswamy_kumaraswamy(p, q):
     return kl_kumaraswamy_kumaraswamy(p, q, n_samples=1, exact_entropy=True)
 
+
+@register_kl(Kumaraswamy, Uniform)
+def _kl(p, q):
+    # E_p[log U] is a constant
+    #  the constant corresponds to 1 if U is U(0,1)
+    #  to be sure we compute it over the (0, 1) interval in terms of the Uniform's cdf
+    constant = - torch.log(q.cdf(1) - q.cdf(0))
+    return - p.entropy() - constant

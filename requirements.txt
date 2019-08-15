@@ -1,0 +1,4 @@
+matplotlib
+torch>=1.1.0
+numpy
+tensorboardX==1.6

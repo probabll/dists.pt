@@ -5,6 +5,15 @@ Sparse distributions for pytorch:
 * HardKumaraswamy
 * Mixture of delta and Exponential
 
+**Instalation**
+
+```bash
+virtualenv -p python3.7 ~/envs/py37
+source ~/envs/py37/bin/activate
+pip install -r requirements.txt
+python setup.py develop
+```
+
 
 # Contributors
 

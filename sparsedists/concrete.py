@@ -10,12 +10,10 @@ class BinaryConcrete(torch.distributions.relaxed_bernoulli.RelaxedBernoulli):
         super(BinaryConcrete, self).__init__(temperature, probs=probs, logits=logits, validate_args=validate_args)
         
     def cdf(self, value):
-        loc = torch.nn.functional.logsigmoid(self.logits)
-        return torch.sigmoid((torch.log(value + EPS) - torch.log(1. - value + EPS)) * self.temperature - loc)
+        return torch.sigmoid((torch.log(value + EPS) - torch.log(1. - value + EPS)) * self.temperature - self.logits)
     
     def icdf(self, value):
-        loc = torch.nn.functional.logsigmoid(self.logits)
-        return torch.sigmoid((torch.log(value + EPS) - torch.log(1. - value + EPS) + loc) / self.temperature)
+        return torch.sigmoid((torch.log(value + EPS) - torch.log(1. - value + EPS) + self.logits) / self.temperature)
         
     def rsample_truncated(self, k0, k1, sample_shape=torch.Size()):        
         shape = self._extended_shape(sample_shape)

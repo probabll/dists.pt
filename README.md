@@ -1,23 +1,45 @@
-# sparse-distributions
+# Extensions to torch distributions
+
+Examples:
+
+```python
+import torch.distributions as torchd
+import probabll.distributions as probd
+probd.Kumaraswamy(a=torch.ones(1), b=torch.ones(1))
+probd.MixtureOfGaussians(logits=torch.ones(2), components=torchd.Normal(loc=torch.zeros(2), scale=torch.ones(2)))
+```
+
+# Installation
+
+* Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+* For developers
+
+```bash
+python setup.py develop
+```
+
+* For users
+
+```bash
+pip install .
+```
+
+# Sparse relaxations to binary random variables
 
 Sparse distributions for pytorch:
 
 * HardKumaraswamy
 * Mixture of delta and Exponential
 
-**Instalation**
-
-```bash
-virtualenv -p python3.7 ~/envs/py37
-source ~/envs/py37/bin/activate
-pip install -r requirements.txt
-python setup.py develop
-```
-
 
 # Contributors
 
-Though the history of commits won't show this code base received contributions from:
+Though the history of commits won't necessarily show it, this code base received contributions from:
 
 * [Nicola De Cao](https://github.com/nicola-decao)
 * [Joost Bastings](https://github.com/bastings)

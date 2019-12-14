@@ -35,3 +35,4 @@ def bernoulli_log_probs_from_logit(logit):
     :return: log_p, log_q
     """
     return - F.softplus(-logit), - F.softplus(logit)
+

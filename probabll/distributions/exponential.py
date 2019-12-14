@@ -64,3 +64,4 @@ def _kl(p, q):
     #  to be sure we compute it over the (0, 1) interval in terms of the Uniform's cdf
     constant = - torch.log(q.cdf(1) - q.cdf(0))
     return - p.entropy() - constant
+

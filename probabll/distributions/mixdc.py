@@ -15,7 +15,8 @@ from torch.distributions.utils import broadcast_all
 from torch.distributions.kl import register_kl, kl_divergence
 import torch.nn.functional as F
 from torch.distributions.utils import probs_to_logits, logits_to_probs
-from sparsedists.bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
+
+from .bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
 
 EPS = 1e-5
 

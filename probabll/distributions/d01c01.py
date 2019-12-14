@@ -16,7 +16,10 @@ from torch.distributions.utils import broadcast_all
 from torch.distributions.kl import register_kl, kl_divergence
 import torch.nn.functional as F
 from torch.distributions.utils import probs_to_logits, logits_to_probs
-from sparsedists.bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
+
+from .bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
+from .stretched import Stretched
+from .truncated import Truncated01
 
 EPS = 1e-4
 
@@ -36,13 +39,13 @@ class D01C01:
         h = - self.p0 * self.log_p0 - self.p1 * self.log_p1 - self.pc * self.log_pc + self.pc * self.cont.entropy()
         return h
 
-    def kl(p, q, n_samples=1, exact_entropy=False):    
+    def kl(p, q, n_samples=1, exact_entropy=False):
         """
         """
         if not (isinstance(p, D01C01) or isinstance(q, D01C01)):
             raise ValueError("p and q must mix delta(x), delta(1-x), and a density over (0, 1)")
 
-        kl0 = p.p0 * (p.log_p0 - q.log_p0)     
+        kl0 = p.p0 * (p.log_p0 - q.log_p0) 
         kl1 = p.p1 * (p.log_p1 - q.log_p1)
         klc = p.pc * (p.log_pc - q.log_pc)
         # Here we estimate the last term by sampling in the continuous support (0, 1)
@@ -123,79 +126,6 @@ class MixtureD01C01(D01C01,Distribution):
         return cdf
     
     
-class Stretched(torch.distributions.TransformedDistribution):
-    """
-    This stretches a distribution via an affine transformation.
-    """
-    
-    def __init__(self, base: Distribution, lower=-0.1, upper=1.1):
-        assert lower < 0. and upper > 1., "You need to specify lower < 0 and upper > 1"
-        super(Stretched, self).__init__(
-            base,
-            torch.distributions.AffineTransform(loc=lower, scale=upper - lower)
-        )
-        self.lower = lower
-        self.upper = upper
-        self.loc = lower
-        self.scale = upper - lower
-
-
-class Truncated01(Distribution):
-    """
-    Truncate a base distribution to the support (0, 1), 
-        for this to work the base must have a support wider than (0, 1)
-        and it must have a closed-form cdf (necessary for normalisation) 
-        and inverse cdf (necessary for sampling).
-
-    The result is itself a properly normalised density.         
-    """
-    
-    def __init__(self, base: Distribution, validate_args=None):
-        super(Truncated01, self).__init__(
-            base.batch_shape, 
-            base.event_shape, 
-            validate_args=validate_args)
-        
-        self.base = base
-        # this is used to get the shape and device of the base
-        x = self.base.sample()
-        self._base_cdf0 = self.base.cdf(torch.zeros_like(x))
-        self._normaliser = torch.clamp(self.base.cdf(torch.ones_like(x)) - self._base_cdf0, min=EPS)
-        self._uniform = Uniform(torch.zeros_like(x) + EPS, torch.ones_like(x) - EPS)
-    
-    def log_prob(self, value):
-        log_p = self.base.log_prob(value) - torch.log(self._normaliser)
-        log_p = torch.where((value < 0) + (value > 1), torch.full_like(log_p, float('-inf')), log_p)                
-        return log_p
-    
-    def cdf(self, value):
-        cdf = (self.base.cdf(value) - self._base_cdf0) / self._normaliser
-        cdf = torch.where(value < 0, torch.zeros_like(cdf), cdf)  # flat at zero for x < 0
-        cdf = torch.where(value > 1, torch.ones_like(cdf), cdf)   # flat at one for x > 1
-        return cdf
-            
-    def sample(self, sample_shape=torch.Size()):
-        with torch.no_grad():
-            return self.rsample(sample_shape)
-        
-    def rsample(self, sample_shape=torch.Size()):        
-        # Sample from a uniform distribution
-        #  and transform it to the corresponding truncated uniform distribution
-        # Let F be the cdf of the base and I its inverse. Let G be the cdf of the truncated distribution and J its inverse. Let U be a uniform random variable over (0, 1).
-        # We can sample from the truncated distribution via
-        # X = I( F(0) + U * (F(1) - F(0)) )
-        # Proof:
-        #  Pr{ I( F(0) + U * (F(1) - F(0)) ) <= x }           Let's apply F to both sides of the inequality
-        #  = Pr{ F(0) + U*(F(1) - F(0) } <= F(x) }
-        #  = Pr{ U <= (F(x) - F(0))/(F(1)-F(0)) }             Note that the right-hand side corresponds to G(x)
-        #  = Pr{ U <= G(x) }                                  Now let's apply J to both sides
-        #  = Pr{ J(U) <= x }                                  Done!
-        u = self._uniform.sample(sample_shape)
-        u = self._base_cdf0 + u * self._normaliser
-        # Map to sample space using the base's inverse cdf
-        return self.base.icdf(torch.clamp(u, min=EPS, max=1-EPS))
-    
-    
 class Rectified01(D01C01,Distribution):
     
     def __init__(self, base: Distribution, validate_args=None):
@@ -219,9 +149,9 @@ class Rectified01(D01C01,Distribution):
         self.pc = torch.clamp(self.base.cdf(torch.ones_like(x)) - self.p0, min=EPS, max=1-EPS)
         self.p1 = torch.clamp(1 - self.p0 - self.pc, min=EPS, max=1-EPS)
         # Log probs
-        self.log_p0 = torch.log(self.p0)
-        self.log_p1 = torch.log(self.p1)
-        self.log_pc = torch.log(self.pc)
+        self.log_p0 = torch.log(self.p0 + EPS)
+        self.log_p1 = torch.log(self.p1 + EPS)
+        self.log_pc = torch.log(self.pc + EPS)
         
         self.cont = Truncated01(base)
         
@@ -247,13 +177,12 @@ class Rectified01(D01C01,Distribution):
          and not the open interval (left, right) which is the support of the stretched variable.
         """
         cdf = torch.where(
-            value < torch.ones_like(value),  
+            value < 1.,  
             self.base.cdf(value), 
             torch.ones_like(value)           # all of the mass
         )
         cdf = torch.where(value < 0., torch.zeros_like(cdf), cdf)
-        cdf = torch.where(value > 1., torch.ones_like(cdf), cdf)
-        return cdf
+        return cdf 
             
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():

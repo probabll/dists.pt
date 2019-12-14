@@ -1,6 +1,5 @@
 import torch
-from torch.distributions import constraints
-from torch.distributions.uniform import Uniform
+from torch.distributions import constraints, Beta, Uniform 
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
@@ -128,19 +127,6 @@ def kl_kumaraswamy_kumaraswamy(p, q, n_samples=1, exact_entropy=True):
     cross_entropy = - q.log_prob(x).mean(0)
     return - p_entropy + cross_entropy
 
-def kl_kumaraswamy_beta(p, q, m=10):
-    """
-    Approximation by https://arxiv.org/pdf/1605.06197.pdf
-     m: number of terms in the taylor expansion
-    """
-    term1 = (p.a - q.a) / p.a * (- euler_constant - torch.digamma(p.b) - torch.reciprocal(p.b))
-    term1 += torch.log(p.a) + torch.log(p.b) + _lbeta(q.a, q.b)
-    term1 -= (p.b - 1) / p.b
-    # Truncated Taylor expansion around 1
-    log_taylor = torch.logsumexp(torch.stack([_lbeta(m / p.a, p.b) - torch.log(m + p.a * p.b) for m in range(1, 10 + 1)], dim=-1), dim=-1)
-    term2 = (q.b - 1) * p.b * torch.exp(log_taylor)
-    return term1 + term2
-    
 
 @register_kl(Kumaraswamy, Kumaraswamy)
 def _kl_kumaraswamy_kumaraswamy(p, q):
@@ -154,3 +140,29 @@ def _kl(p, q):
     #  to be sure we compute it over the (0, 1) interval in terms of the Uniform's cdf
     constant = - torch.log(q.cdf(1) - q.cdf(0))
     return - p.entropy() - constant
+
+
+@register_kl(Kumaraswamy, Beta)
+def _kl_kumaraswamy_beta(p, q, m=10):
+    """
+    Return KL(Kumaraswamy(a,b) || Beta(alpha, beta)). We employ the approximation by https://arxiv.org/pdf/1605.06197.pdf
+    p: a (batch of) Kumaraswamy distribution(s)
+    q: a (batch of) Beta distribution(s)
+    m: number of terms in the taylor expansion
+    """
+    # This is a Kumaraswamy
+    pa = p.a
+    pb = p.b
+    # The Beta in torch.distributions has different parameter names
+    qa = q.concentration1
+    qb = q.concentration0
+    # KL approximation
+    term1 = (pa - qa) / pa * (- euler_constant - torch.digamma(pb) - torch.reciprocal(pb))
+    term1 += torch.log(pa) + torch.log(pb) + _lbeta(qa, qb)
+    term1 -= (pb - 1) / pb
+    # Truncated Taylor expansion around 1
+    log_taylor = torch.logsumexp(torch.stack([_lbeta(m / pa, pb) - torch.log(m + pa * pb) for m in range(1, 10 + 1)], dim=-1), dim=-1)
+    term2 = (qb - 1) * pb * torch.exp(log_taylor)
+    # We truncate the expansion from below just in case
+    return torch.clamp(term1 + term2, min=0.)
+

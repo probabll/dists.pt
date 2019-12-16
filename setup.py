@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 setup(name='probabll.distributions',
       version='1.0',
@@ -6,7 +6,7 @@ setup(name='probabll.distributions',
       author='Probabll',
       author_email='w.aziz@uva.nl',
       url='https://github.com/probabll/dists.pt',
-      packages=find_packages(),
+      packages=find_namespace_packages(include=['probabll.*']),
       python_requires='>=3.6',
       include_package_data=True
 )

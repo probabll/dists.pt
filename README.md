@@ -42,7 +42,7 @@ Sparse distributions for pytorch:
 Though the history of commits won't necessarily show it, this code base received contributions from:
 
 * [Nicola De Cao](https://github.com/nicola-decao)
-* [Joost Bastings](https://github.com/bastings)
+* [Jasmijn Bastings](https://github.com/bastings)
 * [Bryan Eikema](https://github.com/roxot)
 * [Wilker Aziz](https://github.com/wilkeraziz)
 
@@ -50,4 +50,4 @@ Though the history of commits won't necessarily show it, this code base received
 
 If you use HardKumaraswamy please cite this paper:
 
-* [Joost Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://www.aclweb.org/anthology/P19-1284)
+* [Jasmijn Bastings, Wilker Aziz and Ivan Titov. In ACL, 2019.](https://www.aclweb.org/anthology/P19-1284)

@@ -22,10 +22,14 @@ class BinaryConcrete(torch.distributions.relaxed_bernoulli.RelaxedBernoulli):
                            self.cdf(torch.full_like(self.logits, k1))).rsample(sample_shape)
         x = (uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()) / self.temperature
         return torch.sigmoid(x)
-    
+
+
 def kl_concrete_concrete(p, q, n_samples=1):
-    x = p.sample(sample_shape=torch.Size([n_samples]))
-    return (p.log_prob(x) - q.log_prob(x)).mean(0)
+    """
+    KL is estimated for the logits of the concrete distribution to avoid underflow.
+    """
+    x_logit = p.base_dist.rsample(torch.Size([n_samples]))
+    return (p.base_dist.log_prob(x_logit) - q.base_dist.log_prob(x_logit)).mean(0)
 
 
 @register_kl(BinaryConcrete, BinaryConcrete)

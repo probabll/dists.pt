@@ -28,7 +28,7 @@ def kl_concrete_concrete(p, q, n_samples=1):
     """
     KL is estimated for the logits of the concrete distribution to avoid underflow.
     """
-    x_logit = p.base_dist.rsample(torch.Size([n_samples]))
+    x_logit = p.base_dist.sample(torch.Size([n_samples]))
     return (p.base_dist.log_prob(x_logit) - q.base_dist.log_prob(x_logit)).mean(0)
 
 

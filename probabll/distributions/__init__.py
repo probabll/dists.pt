@@ -9,6 +9,8 @@ from .mixture import MixtureSameFamily, MixtureOfGaussians
 from .product import ProductOfDistributions
 from .stretched import Stretched
 from .truncated import Truncated01
+from .dirichlet import MaskedDirichlet
+from .bitvector import NonEmptyBitVector
 
 
 import torch.distributions as torchd
@@ -51,6 +53,8 @@ __all__ = [
     "Stretched",
     "Truncated01",
     "get_named_params",
+    "MaskedDirichlet",
+    "NonEmptyBitVector"
 ]
 
 

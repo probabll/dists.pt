@@ -185,7 +185,10 @@ class NonEmptyBitVector(td.Distribution):
             # [S, B, K+2]
             L = torch.zeros(sample_shape + batch_shape + (K+2,), device=self._scores.device).long()            
             # [L, B, K+2, 3]
-            eps = td.Gumbel(loc=torch.zeros(L.shape + (3,), device=self._scores.device), scale=1).sample()
+            eps = td.Gumbel(
+                    loc=torch.zeros(L.shape + (3,), device=self._scores.device), 
+                    scale=torch.ones(L.shape + (3,), device=self._scores.device)
+            ).sample()
             # [...,K+1,3,3]
             W = self._arc_weight
             # [...,K+2,3]

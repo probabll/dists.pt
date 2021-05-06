@@ -42,6 +42,7 @@ class NonEmptyBitVector(td.Distribution):
 
         :param scores: log pontetials with shape [B, K]
         :return:
+            * FSA structure represented as a boolean tensor with shape [B, K+1, 3, 3]
             * weight of outgoing arcs with shape [B, K+1, 3, 3]
             * (backward/inside) value of states with shape [B, K+2, 3]
         """
@@ -49,6 +50,8 @@ class NonEmptyBitVector(td.Distribution):
         # initialise weights of outgoing arcs from initial state (k=0, L=*) 
         #  and every intermediate state until the pre-final states (k=K, L=*)
         # the initial value is semiring.zero (-inf for LogProb semiring)
+        # also initialise a boolean tensor indicating valid arcs 
+        M = torch.zeros(batch_shape + (K+1, 3, 3), device=scores.device, dtype=torch.bool)
         W = torch.zeros(batch_shape + (K+1, 3, 3), device=scores.device) - np.inf
         # we have 3 possible labels
         # W[b, k, 0]: x_{b,k+1} is False, sum(x_{b,:k+1}) + x_{b,k+1} = 0
@@ -62,14 +65,24 @@ class NonEmptyBitVector(td.Distribution):
 
         # arcs from (k,L=0) to (k+1,L=0) and (k+1,L=2) 
         W[...,:-1,0,:] = torch.stack([-scores, ninf, scores], -1)
+        M[...,:-1,0,0] = True
+        M[...,:-1,0,2] = True
+
         # arcs from (k,L=1) to (k+1,L=1) and (k+1,L=2) 
-        W[...,1:-1,1,:] = torch.stack([ninf[...,1:], -scores[...,1:], scores[...,1:]], -1)
+        W[...,2:-1,1,:] = torch.stack([ninf[...,2:], -scores[...,2:], scores[...,2:]], -1)
+        M[...,2:-1,1,1] = True
+        M[...,2:-1,1,2] = True
+
         # arcs from (k,L=2) to (k+1,L=1) and (k+1,L=2)
         W[...,1:-1,2,:] = torch.stack([ninf[...,1:], -scores[...,1:], scores[...,1:]], -1)
+        M[...,1:-1,2,1] = True
+        M[...,1:-1,2,2] = True
 
         # arcs from pre-final states to final state
         W[...,K,1,1] = 0
         W[...,K,2,1] = 0
+        M[...,K,1,1] = True
+        M[...,K,2,1] = True
 
         # Compute values and reverse values: https://www.aclweb.org/anthology/J99-4004.pdf
         # This can be a bit confusing, so let me make some connections.
@@ -95,10 +108,16 @@ class NonEmptyBitVector(td.Distribution):
 
         # Compute values and reverse values in a single linear pass
         for k in torch.flip(torch.arange(K+1, device=scores.device), [-1]): 
-            V[...,k,:] = torch.logsumexp(W[...,k,:,:] + V[...,k+1,None,:], dim=-1)
-            R[...,K-k+1,:] = torch.logsumexp(W[...,K-k,:,:] + R[...,K-k,:,None], dim=-2)        
+            # [...,3,3]
+            m_k = M[...,k,:,:]
+            w_k = W[...,k,:,:]
+            V[...,k,:] = torch.logsumexp(torch.where(m_k, w_k + V[...,k+1,None,:], m_k.float() - np.inf), dim=-1)
+            # [...,3,3]
+            m_rk = M[...,K-k,:,:]
+            w_rk = W[...,K-k,:,:]
+            R[...,K-k+1,:] = torch.logsumexp(torch.where(m_rk, w_rk + R[...,K-k,:,None], m_rk.float() - np.inf), dim=-2)        
 
-        return W, V, R
+        return M, W, V, R
     
     def __init__(self, scores, validate_args=False):
         """
@@ -107,14 +126,15 @@ class NonEmptyBitVector(td.Distribution):
         self._scores = scores  # [B, K]
         batch_shape, K = scores.shape[:-1], scores.shape[-1]
         event_shape = torch.Size([K])
-        super(NonEmptyBitVector, self).__init__(batch_shape, event_shape, validate_args)
+        super().__init__(batch_shape, event_shape, validate_args)
         self._K = K
-        self._arc_weight, self._state_value, self._state_rvalue = self._arc_weight_and_state_value(scores)
+        self._fsa, self._arc_weight, self._state_value, self._state_rvalue = self._arc_weight_and_state_value(scores)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(NonEmptyBitVector, _instance)
         batch_shape = torch.Size(batch_shape)
         new._scores = self._scores.expand(batch_shape + self.event_shape)        
+        new._fsa = self._fsa.expand(batch_shape + (self._K+1, 3, 3))
         new._arc_weight = self._arc_weight.expand(batch_shape + (self._K+1, 3, 3))
         new._state_value = self._state_value.expand(batch_shape + (self._K+2, 3))
         new._state_rvalue = self._state_rvalue.expand(batch_shape + (self._K+2, 3))
@@ -130,6 +150,10 @@ class NonEmptyBitVector(td.Distribution):
     @property
     def support_size(self):
         return 2 ** self._K - 1
+
+    @property
+    def fsa(self):
+        return self._fsa
 
     @property
     def scores(self):
@@ -252,10 +276,12 @@ class NonEmptyBitVector(td.Distribution):
 
         # A fully vectorised implementation is possible, but it's tricky to 
         #  visualise. I'll try my best to explain it here.
-        W = self._arc_weight
-        V = self._state_value
-        R = self._state_rvalue
+        M = self.fsa
+        W = self.arc_weight
+        V = self.state_value
+        R = self.state_rvalue
         # Recall that
+        #  * M.shape is [B, K+1, 3, 3] (this is a boolean mask indicating the valid arcs)
         #  * W.shape is [B, K+1, 3, 3]
         #  * V.shape is [B, K+2, 3]        
         #  and the batch dimension B could actually be a tuple of dimensions.
@@ -271,16 +297,19 @@ class NonEmptyBitVector(td.Distribution):
         #  where I forget k=0 and unsqueeze the second last dimension.
         # The result has the same shape of W, which is desirable
         #  since we are computing expected values for the edge potentials
+        #  (note we should mask this operation following the FSA structure M, 
+        #   that's because we are subtracting quantities that are potentially -inf, 
+        #   which would lead to NaNs)
         # [B, K+1, 3, 3]
-        log_mu = R[...,:-1,:,None] + W + V[...,1:,None,:] - V[...,0,0,None,None,None]
+        log_mu = torch.where(M, R[...,:-1,:,None] + W + V[...,1:,None,:] - V[...,0,0,None,None,None], M.float() - np.inf)
         # We need the marginal (not its log)
         mu = log_mu.exp()
         # Here we use masked product, this is needed because we want the semantics
         # inf * 0 = 0, but for good reasons that's not what torch produces 
         # in this specific context, a masked product is wanted and safe.
-        expected = torch.where(mu == 0, torch.zeros_like(mu), other._arc_weight * mu)
+        expected = torch.where(mu == 0, torch.zeros_like(mu), other.arc_weight * mu)
         # For the entropy simply compute the expected potential and shift by log Z_q
-        H = -(expected.sum((-1, -2, -3)) - other._state_value[...,0,0])
+        H = -(expected.sum((-1, -2, -3)) - other.state_value[...,0,0])
         
         # less vectorised code (easier to read)
         #nH = 0.
@@ -291,10 +320,10 @@ class NonEmptyBitVector(td.Distribution):
         #            log_w = R[...,k,ori] + W[...,k,ori,dest] + V[...,k+1,dest] - V[...,0,0]
         #            w = log_w.exp()                                        
         #            # expected score
-        #            e = other._arc_weight[...,k,ori,dest] * w
+        #            e = other.arc_weight[...,k,ori,dest] * w
         #            e = torch.where(w == 0, torch.zeros_like(e), e)
         #            nH = nH + e
-        #H = - (nH - other._state_value[...,0,0])
+        #H = - (nH - other.state_value[...,0,0])
 
         return H
 

@@ -106,21 +106,19 @@ class NonEmptyBitVector(td.Distribution):
         """
         self._scores = scores  # [B, K]
         batch_shape, K = scores.shape[:-1], scores.shape[-1]
-        if len(batch_shape) > 1:
-            raise ValueError("This implementation cannot take batch_shape more complex than [num]")
-        event_shape = torch.Size([])        
+        event_shape = torch.Size([K])
         super(NonEmptyBitVector, self).__init__(batch_shape, event_shape, validate_args)
-
         self._K = K
         self._arc_weight, self._state_value, self._state_rvalue = self._arc_weight_and_state_value(scores)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(NonEmptyBitVector, _instance)
         batch_shape = torch.Size(batch_shape)
-        new._scores = self._scores.expand(batch_shape + self.event_shape)
-        new._arc_weight = self._arc_weight.expand(batch_shape + self.event_shape)
-        new._state_value = self._state_value.expand(batch_shape + self.event_shape)
-        new._state_rvalue = self._state_rvalue.expand(batch_shape + self.event_shape)
+        new._scores = self._scores.expand(batch_shape + self.event_shape)        
+        new._arc_weight = self._arc_weight.expand(batch_shape + (self._K+1, 3, 3))
+        new._state_value = self._state_value.expand(batch_shape + (self._K+2, 3))
+        new._state_rvalue = self._state_rvalue.expand(batch_shape + (self._K+2, 3))
+        new._K = self._K
         super(NonEmptyBitVector, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
@@ -154,43 +152,48 @@ class NonEmptyBitVector(td.Distribution):
         return log_prob - self._state_value[...,0,0]
 
     def sample(self, sample_shape=torch.Size()):    
-        if len(sample_shape) > 1:
-            raise ValueError("This implementation cannot take sample_shape more complex than [num]")
 
+        # In comments, I use S as an indication of dimension(s) related to sample_shape
+        # and B as an indication of dimension(s) related to batch_shape
         with torch.no_grad():
-            batch_shape, K = self.batch_shape, self._K
+            batch_shape, K = self.batch_shape, self._K  
             # This will store the sequence of labels from k=0 to K+1
-            # [sample_shape, B, K+2]
-            S = torch.zeros(sample_shape + batch_shape + (K+2,), device=self._scores.device).long()            
-            # [sample_shape, B, K+2, 3]
-            eps = td.Gumbel(loc=torch.zeros(S.shape + (3,), device=self._scores.device), scale=1).sample()
+            # [S, B, K+2]
+            L = torch.zeros(sample_shape + batch_shape + (K+2,), device=self._scores.device).long()            
+            # [L, B, K+2, 3]
+            eps = td.Gumbel(loc=torch.zeros(L.shape + (3,), device=self._scores.device), scale=1).sample()
             # [...,K+1,3,3]
             W = self._arc_weight
             # [...,K+2,3]
             V = self._state_value
             for k in torch.arange(K+1, device=self._scores.device): 
-                if len(batch_shape) == 0:
-                    # [..., 3]
-                    logits_k = W[...,k,S[...,k],:] + V[...,k+1,:]
-                else:
-                    # [...,3,3]
-                    W_k = W[...,k,:,:]
-                    # [...,3]
-                    v_kp1 = V[...,k+1,:] 
-                    idx = S[...,k]  
-                    # batched selection 
-                    # torch.arange selects the batch, idx selects the step
-                    # [...,3]
-                    logits_k = W_k[torch.arange(len(W_k), device=W_k.device).unsqueeze(-1), idx.transpose(1,0)].transpose(1,0) + v_kp1                
-                # Categorical sampling
-                #S[...,k+1] = td.Categorical(logits=logits_k).sample().long()
-                # Categorical sampling via Gumbel-Argmax
-                S[...,k+1] = torch.argmax(logits_k + eps[...,k+1,:], -1).long()                
+                # weights of arcs leaving this coordinate
+                # [B, 3, 3]
+                W_k = W[...,k,:,:]
+                # reshape to introduce sample_shape dimensions
+                # [S, B, 3, 3]
+                W_k = W_k.view((1,) * len(sample_shape) + W_k.shape).expand(sample_shape + (-1,)*len(W_k.shape))
+                # origin state for coordinate k
+                # [S, B]
+                L_k = L[...,k]
+                # reshape to a 3-dimensional one-hot encoding of the label 
+                # [S, B, 3, 1]
+                L_k = torch.nn.functional.one_hot(L_k, 3).unsqueeze(-1)
+                # select the weights for destination (zeroing out the rest)
+                # [S, B, 3, 3]
+                logits_k = torch.where(L_k == 1, W_k, torch.zeros_like(W_k))
+                # sum 0s out and incorporate value of destination
+                # [S, B, 3]
+                logits_k = logits_k.sum(-2) + V[...,k+1,:] 
 
-            assert (S[...,-1] == 1).all(), "Not every sample reached the final state"
-            S = S[...,1:-1]  # discard the initial (k=0) and final (k=K+1) states
+                # Categorical sampling via Gumbel-Argmax
+                #  possibly more efficient than td.Categorical(logits=logits_k).sample().long()
+                L[...,k+1] = torch.argmax(logits_k + eps[...,k+1,:], -1).long()                
+
+            assert (L[...,-1] == 1).all(), "Not every sample reached the final state"
+            L = L[...,1:-1]  # discard the initial (k=0) and final (k=K+1) states
             # map to boolean and then float (in torch discrete samples are float)
-            return (S == 2).float()
+            return (L==2).float()
 
     def enumerate_support(self, expand=True, max_K=10):
         """
@@ -338,7 +341,7 @@ def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     # Shapes
     assert F.batch_shape == batch_shape, "NonEmptyBitVector has the wrong batch_shape"
     assert F.dim == K, "NonEmptyBitVector has the wrong dim"
-    assert F.event_shape == tuple(), "NonEmptyBitVector has the wrong event_shape"
+    assert F.event_shape == (K,), "NonEmptyBitVector has the wrong event_shape"
     assert F.scores.shape == batch_shape + (K,), "NonEmptyBitVector.score has the wrong shape"
     assert F.arc_weight.shape == batch_shape + (K+1,3,3), "NonEmptyBitVector.arc_weight has the wrong shape"
     assert F.state_value.shape == batch_shape + (K+2,3), "NonEmptyBitVector.state_value has the wrong shape"
@@ -348,8 +351,19 @@ def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     # test shape of support
     assert support.shape == (2**K-1,) + batch_shape + (K,), "The support has the wrong shape"
 
+    assert F.expand((2,3) + batch_shape).batch_shape == (2,3) + batch_shape, "Bad expand batch_shape"
+    assert F.expand((2,3) + batch_shape).event_shape == (K,), "Bad expand event_shape"
+    assert F.expand((2,3) + batch_shape).sample().shape == (2,3) + batch_shape + (K,), "Bad expand single sample"
+    assert F.expand((2,3) + batch_shape).sample((13,)).shape == (13,2,3) + batch_shape + (K,), "Bad expand multiple samples"
+
     # Constraints
     assert (support.sum(-1) > 0).all(), "The support has an empty bit vector"
+    for _ in range(100):  # testing one sample at a time
+        assert F.sample().sum(-1).all(), "I found an empty vector"
+    # testing a batch of samples
+    assert F.sample((100,)).sum(-1).all(), "I found an empty vector"
+    # testing a complex batch of samples
+    assert F.sample((2, 100,)).sum(-1).all(), "I found an empty vector"
     
     # Distribution
     # check for uniform probabilities
@@ -375,6 +389,17 @@ def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     assert torch.isclose(P.cross_entropy(Q), -(log_p.exp() * log_q).sum(0), atol=1e-2).all(), "Problem in the cross-entropy DP"
     # KL
     assert torch.isclose(td.kl_divergence(P, Q), (log_p.exp() * (log_p - log_q)).sum(0), atol=1e-2).all(), "Problem in KL"
+
+    # Constraints
+    for _ in range(100):  # testing one sample at a time
+        assert P.sample().sum(-1).all(), "I found an empty vector"
+        assert Q.sample().sum(-1).all(), "I found an empty vector"
+    # testing a batch of samples
+    assert P.sample((100,)).sum(-1).all(), "I found an empty vector"
+    assert Q.sample((100,)).sum(-1).all(), "I found an empty vector"
+    # testing a complex batch of samples
+    assert P.sample((2, 100,)).sum(-1).all(), "I found an empty vector"
+    assert Q.sample((2, 100,)).sum(-1).all(), "I found an empty vector"
 
 test_non_empty_bit_vector(K=3)
 test_non_empty_bit_vector((3,), K=3)

@@ -11,6 +11,7 @@ from .stretched import Stretched
 from .truncated import Truncated01
 from .dirichlet import MaskedDirichlet
 from .bitvector import NonEmptyBitVector
+from .deterministic import Delta
 
 
 import torch.distributions as torchd
@@ -43,6 +44,7 @@ __all__ = [
     "bernoulli_probs_from_logit",
     "BinaryConcrete",
     "D01C01",
+    "Delta",
     "MixtureD01C01",
     "Rectified01",
     "RightTruncatedExponential",

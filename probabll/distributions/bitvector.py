@@ -332,6 +332,24 @@ class NonEmptyBitVector(td.Distribution):
 
     def entropy(self):
         return self.cross_entropy(self)
+    
+    def marginals(self):
+        """
+
+        :return: [B, K]        
+        """
+        M = self.fsa
+        W = self.arc_weight
+        V = self.state_value
+        R = self.state_rvalue
+        # [B, K+1, 3, 3]
+        log_mu = torch.where(M, R[...,:-1,:,None] + W + V[...,1:,None,:] - V[...,0,0,None,None,None], M.float() - np.inf)
+        mu = log_mu.exp()
+        # [B, K, 3]
+        mu = mu[...,:-1,:,2]
+        # [B, K]
+        mu = mu.sum(-1)
+        return mu
 
     def mode(self):
         """
@@ -401,7 +419,8 @@ def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     # check for uniform probabilities
     assert torch.isclose(F.log_prob(support).exp(), torch.tensor(1./F.support_size)).all(), "Non-uniform"
     # check for uniform marginal probabilities
-    assert torch.isclose(F.sample((10000,)).float().mean(0), support.mean(0), atol=1e-1).all(), "Bad marginals"    
+    assert torch.isclose(F.sample((10000,)).float().mean(0), support.mean(0), atol=1e-1).all(), "Bad MC marginals"    
+    assert torch.isclose(F.marginals(), support.mean(0)).all(), "Bad exact marginals"
 
     # Entropy
 

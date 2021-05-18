@@ -1,7 +1,7 @@
 from itertools import chain
 
 from .bernoulli import bernoulli_probs_from_logit, bernoulli_log_probs_from_logit
-from .concrete import BinaryConcrete
+from .concrete import BinaryConcrete, RelaxedOneHotCategoricalStraightThrough
 from .d01c01 import D01C01, MixtureD01C01, Rectified01
 from .exponential import RightTruncatedExponential
 from .kumaraswamy import Kumaraswamy
@@ -52,6 +52,7 @@ __all__ = [
     "MixtureSameFamily",
     "MixtureOfGaussians", 
     "ProductOfDistributions",
+    "RelaxedOneHotCategoricalStraightThrough",
     "Stretched",
     "Truncated01",
     "get_named_params",

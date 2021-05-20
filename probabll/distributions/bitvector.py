@@ -5,6 +5,7 @@ from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from itertools import product
+from collections import Counter
 import numpy as np
 
 
@@ -382,10 +383,7 @@ def _kl_nonemptybitvector_nonemptybitvector(p, q):
     return p.cross_entropy(q) - p.entropy()
 
 
-### Test stuff
 
-
-from collections import Counter 
 
 def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     assert K<= 10, "I test against explicit enumeration, K>10 might be too slow for that"
@@ -456,12 +454,6 @@ def test_non_empty_bit_vector(batch_shape=tuple(), K=3):
     # testing a complex batch of samples
     assert P.sample((2, 100,)).sum(-1).all(), "I found an empty vector"
     assert Q.sample((2, 100,)).sum(-1).all(), "I found an empty vector"
-
-test_non_empty_bit_vector(K=3)
-test_non_empty_bit_vector((3,), K=3)
-test_non_empty_bit_vector(K=10)
-test_non_empty_bit_vector((5,), K=10)
-
 
 
 def torch_binom(n, k):
@@ -625,3 +617,64 @@ def _kl_nonemptybitvector_maxentfaces(p, q):
     log_p = p.log_prob(x)
     log_q = q.log_prob(x)
     return (log_p.exp()*(log_p - log_q)).sum(0)
+
+@td.register_kl(MaxEntropyFaces, NonEmptyBitVector)
+def _kl_maxentfaces_nonemptybitvector(p, q):
+    if p.batch_shape != q.batch_shape or p.event_shape != q.event_shape: 
+        raise ValueError("The shapes of p and q differ")
+    # [S, ...]
+    x = p.enumerate_support()
+    log_p = p.log_prob(x)
+    log_q = q.log_prob(x)
+    return (log_p.exp()*(log_p - log_q)).sum(0)
+
+def test_maxent(K, N):
+    p = MaxEntropyFaces(K, N)
+    x = p.enumerate_support()
+    log_p = p.log_prob(x)
+    p_x = log_p.exp()    
+    H = -(p_x * log_p).sum(-1)
+    assert torch.isclose(p_x.sum(-1), torch.ones(p_x.shape[:-1]), atol=1e-6).all(), f"Probabilities must sum to one: {p_x.sum(-1)}"    
+    assert torch.isclose(p.entropy(), H, atol=1e-6).all(), f"Wrong entropy"
+    
+    q = MaxEntropyFaces(K, N + 1)
+    log_q = q.log_prob(x)
+    C = -(p_x * log_q).sum(-1)
+    assert torch.isclose(p.cross_entropy(q), C, atol=1e-6), "Wrong cross-entropy"
+    
+    KL = (p_x * (log_p - log_q)).sum(-1)
+    assert torch.isclose(td.kl_divergence(p, q), KL, atol=1e-6), "Wrong KL( MaxEnt1 || MaxEnt2 )"
+    
+    F = NonEmptyBitVector(torch.zeros(K))
+    log_f = F.log_prob(x)
+    KL2 = (log_f.exp() * (log_f - log_p)).sum(-1)
+    assert torch.isclose(td.kl_divergence(F, p), KL2, atol=1e-6), "Wrong KL( Gibbs || MaxEnt1 )"
+    
+    KL3 = (p_x * (log_p - log_f)).sum(-1)
+    assert torch.isclose(td.kl_divergence(p, F), KL3, atol=1e-6), "Wrong KL( MaxEnt1 || Gibbs)"
+    
+    assert p.expand((5,)).sample().shape == (5, K), f"Wrong shape"
+    
+    num_samples = 10000
+    samples = p.sample((num_samples,))
+    count_n = Counter(b.sum(-1).item() for b in samples)
+    p_n = torch.tensor([count_n.get(n, 0) / num_samples for n in range(1, K + 1)])
+    assert torch.isclose(p_n, p._N.probs, atol=1e-1).all(), "Bad p(n)"
+    
+    count_f = Counter(''.join(f"{1 if i else 0}" for i in b.cpu().numpy()) for b in samples)
+    
+    p_f = torch.tensor([count_f.get(''.join(f"{1 if i else 0}" for i in f.cpu().numpy()), 0)/num_samples for f in x])
+    assert torch.isclose(p_f, p_x, atol=1e-1).all(), "Bad p(f)"
+        
+
+if __name__ == '__main__':
+    test_non_empty_bit_vector(K=3)
+    test_non_empty_bit_vector((3,), K=3)
+    test_non_empty_bit_vector(K=10)
+    test_non_empty_bit_vector((5,), K=10)
+
+
+    for k in range(5):
+        for n in range(5):
+            test_maxent(k + 1, n)        
+

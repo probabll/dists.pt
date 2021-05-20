@@ -10,7 +10,7 @@ from .product import ProductOfDistributions
 from .stretched import Stretched
 from .truncated import Truncated01
 from .dirichlet import MaskedDirichlet
-from .bitvector import NonEmptyBitVector
+from .bitvector import NonEmptyBitVector, MaxEntropyFaces
 from .deterministic import Delta
 
 
@@ -49,6 +49,7 @@ __all__ = [
     "Rectified01",
     "RightTruncatedExponential",
     "Kumaraswamy",
+    "MaxEntropyFaces",
     "MixtureSameFamily",
     "MixtureOfGaussians", 
     "ProductOfDistributions",

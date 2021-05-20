@@ -495,33 +495,32 @@ class MaxEntropyFaces(td.Distribution):
     has_enumerate_support = True
 
     @classmethod
-    def pmf(cls, K, N, device=None):
+    def pmf_n(cls, K, N, device=None):
         with torch.no_grad():
             k = torch.arange(1, K+1, device=device).float()        
             num = (2 ** (N*(k-1))) / torch_factorial(k-1)
             p = num / num.sum(-1, keepdims=True)
             return p    
-        
+
+    @classmethod
+    def construct(cls, K, N, device=None):
+        return MaxEntropyFaces(cls.pmf_n(K, N, device))
     
-    def __init__(self, dim, precision, batch_shape=tuple(), device=None, validate_args=False):
+    def __init__(self, pmf_n, validate_args=False):
         """
-        :param dim: K
-        :param precision: N
+        :param pmf_n: see cls.pmf_n
         """
-        probs = self.pmf(dim, precision, device=device).expand(batch_shape + (dim,))
                 
-        batch_shape, event_shape = probs.shape[:-1], probs.shape[-1:]
+        batch_shape, event_shape = pmf_n.shape[:-1], pmf_n.shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args)
-        self._dim = dim
-        self._precision = precision
-        self._N = td.Categorical(probs=probs)
+        self._dim = pmf_n.shape[-1]
+        self._N = td.Categorical(probs=pmf_n)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MaxEntropyFaces, _instance)
         batch_shape = torch.Size(batch_shape)
         new._N = self._N.expand(batch_shape)        
         new._dim = self._dim
-        new._precision = self._precision
         super(MaxEntropyFaces, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
@@ -533,10 +532,6 @@ class MaxEntropyFaces(td.Distribution):
     @property
     def support_size(self):
         return 2**self._dim -1
-    
-    @property
-    def precision(self):
-        return self._precision
     
     def log_prob(self, value):        
         n = value.float().sum(-1)        
@@ -551,7 +546,7 @@ class MaxEntropyFaces(td.Distribution):
             dims = N.sample(sample_shape) + 1 # Categorical is 0-based
             # Sample a permutation of K vertices
             # [S, K]
-            permutation = torch.argsort(torch.rand(sample_shape + (K,)))
+            permutation = torch.argsort(torch.rand(sample_shape + (K,), device=self._N.probs.device))
             # We want to keep the first n components of the permutation
             # [S, K]
             mask = (1-torch.nn.functional.one_hot(dims, K + 1).cumsum(-1))[...,:-1]
@@ -629,7 +624,7 @@ def _kl_maxentfaces_nonemptybitvector(p, q):
     return (log_p.exp()*(log_p - log_q)).sum(0)
 
 def test_maxent(K, N):
-    p = MaxEntropyFaces(K, N)
+    p = MaxEntropyFaces.construct(K, N)
     x = p.enumerate_support()
     log_p = p.log_prob(x)
     p_x = log_p.exp()    
@@ -637,7 +632,7 @@ def test_maxent(K, N):
     assert torch.isclose(p_x.sum(-1), torch.ones(p_x.shape[:-1]), atol=1e-6).all(), f"Probabilities must sum to one: {p_x.sum(-1)}"    
     assert torch.isclose(p.entropy(), H, atol=1e-6).all(), f"Wrong entropy"
     
-    q = MaxEntropyFaces(K, N + 1)
+    q = MaxEntropyFaces.construct(K, N + 1)
     log_q = q.log_prob(x)
     C = -(p_x * log_q).sum(-1)
     assert torch.isclose(p.cross_entropy(q), C, atol=1e-6), "Wrong cross-entropy"

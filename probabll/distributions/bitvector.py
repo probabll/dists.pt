@@ -129,6 +129,7 @@ class NonEmptyBitVector(td.Distribution):
         super().__init__(batch_shape, event_shape, validate_args)
         self._K = K
         self._fsa, self._arc_weight, self._state_value, self._state_rvalue = self._arc_weight_and_state_value(scores)
+        self._faces = None
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(NonEmptyBitVector, _instance)
@@ -139,6 +140,7 @@ class NonEmptyBitVector(td.Distribution):
         new._state_value = self._state_value.expand(batch_shape + (self._K+2, 3))
         new._state_rvalue = self._state_rvalue.expand(batch_shape + (self._K+2, 3))
         new._K = self._K
+        new._faces = None
         super(NonEmptyBitVector, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
@@ -230,19 +232,22 @@ class NonEmptyBitVector(td.Distribution):
         The return has dtype=float (rather than bool) because in torch 
         outcomes are always float. The shape is [2^K-1, B, K]
         """
-        if max_K:
-            assert self._K <= max_K, f"You probably do not want to enumerate the {self.support_size} outcomes in the sample space?"
-        # [support_size, K]
-        faces = torch.tensor(
-            [x for x in product([0, 1], repeat=self._K) if sum(x)], 
-            device=self._scores.device).float()    
-        if expand:
-            num_faces, K = faces.shape
-            # [num_faces, ..., K]
-            faces = faces.view((num_faces,) + (1,)*len(self.batch_shape) + (K,))
-            # [num_faces, B, K]
-            faces = faces.expand((num_faces,)  + self.batch_shape + (K,))            
-        return faces 
+        if self._faces is None:
+            if max_K:
+                assert self._K <= max_K, f"You probably do not want to enumerate the {self.support_size} outcomes in the sample space?"
+            # [support_size, K]
+            faces = torch.tensor(
+                [x for x in product([0, 1], repeat=self._K) if sum(x)], 
+                device=self._scores.device).float()    
+            if expand:
+                num_faces, K = faces.shape
+                # [num_faces, ..., K]
+                faces = faces.view((num_faces,) + (1,)*len(self.batch_shape) + (K,))
+                # [num_faces, B, K]
+                faces = faces.expand((num_faces,)  + self.batch_shape + (K,))            
+            self._faces = faces
+
+        return self._faces 
 
     def cross_entropy(self, other):
         """
@@ -457,3 +462,166 @@ test_non_empty_bit_vector((3,), K=3)
 test_non_empty_bit_vector(K=10)
 test_non_empty_bit_vector((5,), K=10)
 
+
+
+def torch_binom(n, k):
+    with torch.no_grad():
+        mask = n >= k
+        n = mask * n
+        k = mask * k
+        a = torch.lgamma(n + 1) - torch.lgamma((n - k) + 1) - torch.lgamma(k + 1)
+        return torch.exp(a) * mask
+
+    
+def torch_log_binom(n, k):
+    with torch.no_grad():
+        mask = n >= k
+        n = mask * n
+        k = mask * k
+        a = torch.lgamma(n + 1) - torch.lgamma((n - k) + 1) - torch.lgamma(k + 1)
+        return a * mask        
+
+    
+def torch_factorial(n):
+    with torch.no_grad():
+        a = torch.lgamma(n + 1)
+        return torch.exp(a)
+    
+
+def torch_log_factorial(n):
+    with torch.no_grad():
+        a = torch.lgamma(n + 1)
+        return a
+
+    
+class MaxEntropyFaces(td.Distribution):
+    """
+    This class manipulates distributions over bit-vectors with the constraint that the outcome 'all zeros' is not in the sample space.
+    """
+
+    has_rsample = False
+    has_enumerate_support = True
+
+    @classmethod
+    def pmf(cls, K, N, device=None):
+        with torch.no_grad():
+            k = torch.arange(1, K+1, device=device).float()        
+            num = (2 ** (N*(k-1))) / torch_factorial(k-1)
+            p = num / num.sum(-1, keepdims=True)
+            return p    
+        
+    
+    def __init__(self, dim, precision, batch_shape=tuple(), device=None, validate_args=False):
+        """
+        :param dim: K
+        :param precision: N
+        """
+        probs = self.pmf(dim, precision, device=device).expand(batch_shape + (dim,))
+                
+        batch_shape, event_shape = probs.shape[:-1], probs.shape[-1:]
+        super().__init__(batch_shape, event_shape, validate_args)
+        self._dim = dim
+        self._precision = precision
+        self._N = td.Categorical(probs=probs)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(MaxEntropyFaces, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new._N = self._N.expand(batch_shape)        
+        new._dim = self._dim
+        new._precision = self._precision
+        super(MaxEntropyFaces, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
+    @property
+    def dim(self):
+        return self._dim
+    
+    @property
+    def support_size(self):
+        return 2**self._dim -1
+    
+    @property
+    def precision(self):
+        return self._precision
+    
+    def log_prob(self, value):        
+        n = value.float().sum(-1)        
+        log_p_n = self._N.log_prob(n-1)  # Categorical parameters are 0-based
+        return log_p_n - torch_log_binom(self.dim, n)
+    
+    def sample(self, sample_shape=torch.Size()):    
+        with torch.no_grad():
+            K, N = self.dim, self._N
+            # Sample the number of vertices (n) in the face
+            # [S]
+            dims = N.sample(sample_shape) + 1 # Categorical is 0-based
+            # Sample a permutation of K vertices
+            # [S, K]
+            permutation = torch.argsort(torch.rand(sample_shape + (K,)))
+            # We want to keep the first n components of the permutation
+            # [S, K]
+            mask = (1-torch.nn.functional.one_hot(dims, K + 1).cumsum(-1))[...,:-1]
+            # Turn the subset of the permutation that has been selected into
+            # a collection of 1s (along the corresponding dimensions)
+            #  [S, K]
+            faces = (torch.nn.functional.one_hot(permutation) * mask.unsqueeze(-1)).sum(-2)
+            return faces.float()
+
+    def enumerate_support(self, expand=True, max_K=10):
+        """
+        Return a bit-vector representation of all non-empty faces of 
+        K-1 dimensional simplex. 
+
+        The return has dtype=float (rather than bool) because in torch 
+        outcomes are always float. The shape is [2^K-1, B, K]
+        """
+        if max_K:
+            assert self.dim <= max_K, f"You probably do not want to enumerate the {self.support_size} outcomes in the sample space?"
+        # [support_size, K]
+        faces = torch.tensor(
+            [x for x in product([0, 1], repeat=self.dim) if sum(x)], 
+            device=self._N.probs.device).float()    
+        if expand:
+            num_faces, K = faces.shape
+            # [num_faces, ..., K]
+            faces = faces.view((num_faces,) + (1,)*len(self.batch_shape) + (K,))
+            # [num_faces, B, K]
+            faces = faces.expand((num_faces,)  + self.batch_shape + (K,))            
+        return faces.float() 
+
+    def cross_entropy(self, other):
+        # sum_n p(n)1/binom(k,n) (log q(n) - log binom(k,n))
+        # sum_f p(n)p(f|n) log q(n)p(f|n)
+        # sum_n p(n)p(f|n)binom(k,n) (log q(n) + log p(f|n))
+        # sum_n p(n)binom(k,n)/binom(k,n) (log q(n) - log binom(k,n))
+        # sum_n p(n)(log q(n) - log binom(k,n))
+        if not isinstance(other, MaxEntropyFaces):
+            raise ValueError("I need another MaxEntropyFaces distribution")
+        if self.dim != other.dim:
+            raise ValueError("I cannot compare distributions of different dimensionality")
+        n = self._N.enumerate_support()
+        pn = self._N.log_prob(n).exp()        
+        log_qn = other._N.log_prob(n)
+        log_qnf = log_qn - torch_log_binom(self._dim, n + 1)  # n is 0-based
+        return -(pn * log_qnf).sum(-1)
+
+    def entropy(self):
+        return self.cross_entropy(self)
+
+@td.register_kl(MaxEntropyFaces, MaxEntropyFaces)
+def _kl_maxentfaces_maxentfaces(p, q):
+    if p.batch_shape != q.batch_shape or p.event_shape != q.event_shape: 
+        raise ValueError("The shapes of p and q differ")
+    return p.cross_entropy(q) - p.entropy() 
+
+@td.register_kl(NonEmptyBitVector, MaxEntropyFaces)
+def _kl_nonemptybitvector_maxentfaces(p, q):
+    if p.batch_shape != q.batch_shape or p.event_shape != q.event_shape: 
+        raise ValueError("The shapes of p and q differ")
+    # [S, ...]
+    x = p.enumerate_support()
+    log_p = p.log_prob(x)
+    log_q = q.log_prob(x)
+    return (log_p.exp()*(log_p - log_q)).sum(0)

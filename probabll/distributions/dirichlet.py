@@ -18,7 +18,7 @@ class MaskedDirichlet(td.Distribution):
     has_rsample = True
 
     def __init__(self, mask, concentration, validate_args=None):
-        assert mask.shape == concentration.shape 
+        assert mask.shape == concentration.shape, f"Got mask {mask.shape} and concentration {concentration.shape}"
 
         if validate_args:
             if not (mask.sum(-1) > 0).all():

@@ -45,6 +45,8 @@ class MaskedDirichlet(td.Distribution):
         return new
 
     def rsample(self, sample_shape=torch.Size()):
+        if sample_shape is not None:
+            sample_shape = torch.Size(sample_shape)
         # X_k | f ~ Gamma(alpha_{f,k}, 1)
         X = td.Gamma(self._concentration, torch.ones_like(self._concentration), validate_args=False)  
         # [batch_size, K]

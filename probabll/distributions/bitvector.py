@@ -179,6 +179,8 @@ class NonEmptyBitVector(td.Distribution):
         return log_prob - self._state_value[...,0,0]
 
     def sample(self, sample_shape=torch.Size()):    
+        if sample_shape is not None:
+            sample_shape = torch.Size(sample_shape)
 
         # In comments, I use S as an indication of dimension(s) related to sample_shape
         # and B as an indication of dimension(s) related to batch_shape
@@ -539,6 +541,8 @@ class MaxEntropyFaces(td.Distribution):
         return log_p_n - torch_log_binom(self.dim, n)
     
     def sample(self, sample_shape=torch.Size()):    
+        if sample_shape is not None:
+            sample_shape = torch.Size(sample_shape)
         with torch.no_grad():
             K, N = self.dim, self._N
             # Sample the number of vertices (n) in the face

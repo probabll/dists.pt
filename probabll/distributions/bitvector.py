@@ -514,7 +514,7 @@ class MaxEntropyFaces(td.Distribution):
         batch_shape, event_shape = pmf_n.shape[:-1], pmf_n.shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args)
         self._dim = pmf_n.shape[-1]
-        self._N = td.Categorical(probs=pmf_n)
+        self._N = td.Categorical(logits=pmf_n.log())
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MaxEntropyFaces, _instance)
@@ -592,7 +592,7 @@ class MaxEntropyFaces(td.Distribution):
         pn = self._N.log_prob(n).exp()        
         log_qn = other._N.log_prob(n)
         log_qnf = log_qn - torch_log_binom(self._dim, n + 1)  # n is 0-based
-        return -(pn * log_qnf).sum(-1)
+        return -(pn * log_qnf).sum(0)
 
     def entropy(self):
         return self.cross_entropy(self)

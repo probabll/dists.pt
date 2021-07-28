@@ -12,6 +12,7 @@ from .truncated import Truncated01
 from .dirichlet import MaskedDirichlet
 from .bitvector import NonEmptyBitVector, MaxEntropyFaces
 from .deterministic import Delta
+from .mixed import MixedDirichlet
 
 
 import torch.distributions as torchd
@@ -58,7 +59,8 @@ __all__ = [
     "Truncated01",
     "get_named_params",
     "MaskedDirichlet",
-    "NonEmptyBitVector"
+    "NonEmptyBitVector",
+    "MixedDirichlet"
 ]
 
 

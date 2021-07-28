@@ -109,6 +109,10 @@ class MaskedDirichlet(td.Distribution):
         H = H - (torch.where(self._mask, (self._concentration - 1.0) * torch.digamma(self._concentration), zeros).sum(-1))
         return H
 
+    def cross_entropy(self, other):
+        return self.entropy() + td.kl_divergence(self, other)
+
+
 @td.register_kl(MaskedDirichlet, MaskedDirichlet)
 def _kl_maskeddirichlet_maskeddirichlet(p, q):
     if p.mask.shape != q.mask.shape: 

@@ -71,16 +71,16 @@ class RelaxedOneHotCategoricalStraightThrough(td.RelaxedOneHotCategorical):
         return (hard - sample).detach() + sample
 
     def entropy(self):
-        return td.Categorical(logits=self.logits / self.temperature).entropy()
+        return td.Categorical(logits=self.logits).entropy()
 
     def log_prob(self, value):
-        return td.OneHotCategorical(logits=self.logits / self.temperature).log_prob(value)
+        return td.OneHotCategorical(logits=self.logits).log_prob(value)
 
     def enumerate_support(self, expand=True):
-        return td.OneHotCategorical(logits=self.logits / self.temperature).enumerate_support(expand=expand)
+        return td.OneHotCategorical(logits=self.logits).enumerate_support(expand=expand)
 
 
 @register_kl(RelaxedOneHotCategoricalStraightThrough, RelaxedOneHotCategoricalStraightThrough)
 def _kl_concretest_concretest(p, q):
-    return td.kl_divergence(td.Categorical(logits=p.logits/p.temperature), td.Categorical(logits=q.logits/q.temperature))
+    return td.kl_divergence(td.Categorical(logits=p.logits), td.Categorical(logits=q.logits))
 

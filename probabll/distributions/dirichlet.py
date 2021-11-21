@@ -63,12 +63,14 @@ class MaskedDirichlet(td.Distribution):
 
         # logarithm of Dirichlet normaliser (log Beta(alpha))       
         zeros = torch.zeros_like(self._concentration)
-        log_beta_num = torch.where(self._mask, torch.lgamma(self._concentration), zeros).sum(-1)
-        log_beta_den = torch.lgamma(torch.where(self._mask, self._concentration, zeros).sum(-1))
+        
+        a_ = torch.where(self._mask, torch.lgamma(self._concentration), torch.ones_like(self._concentration))        
+        log_beta_num = torch.where(self._mask, torch.lgamma(a_), zeros).sum(-1)
+        log_beta_den = torch.lgamma(torch.where(self._mask, a_, zeros).sum(-1))
         log_beta = log_beta_num - log_beta_den
 
         # logarithm of unnormalised density
-        log_prob = torch.where(self._mask, (self._concentration - 1) * torch.log(value), torch.zeros_like(value)).sum(-1)
+        log_prob = torch.where(self._mask, (a_ - 1) * torch.log(value), torch.zeros_like(value)).sum(-1)
 
         # normalisation
         log_prob = log_prob - log_beta

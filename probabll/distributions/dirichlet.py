@@ -16,6 +16,7 @@ class MaskedDirichlet(td.Distribution):
     arg_constraints = {'concentration': td.constraints.independent(td.constraints.greater_than_eq(0.), 1)}
     support = td.constraints.simplex
     has_rsample = True
+    version = 1.0
 
     def __init__(self, mask, concentration, validate_args=None):
         assert mask.shape == concentration.shape, f"Got mask {mask.shape} and concentration {concentration.shape}"
@@ -54,7 +55,7 @@ class MaskedDirichlet(td.Distribution):
         # [batch_size, K]
         x = X.rsample(sample_shape)
         # now we mask the Gamma samples from invalid coordinates of lower-dimensional faces
-        x = torch.where(self._mask, x, torch.zeros_like(x)) + 1e-9
+        x = torch.where(self._mask, x, torch.zeros_like(x)) + 1e-6
         # finally, we renormalise the gamma samples
         z = x / x.sum(-1, keepdim=True)
         return z

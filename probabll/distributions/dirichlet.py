@@ -54,7 +54,7 @@ class MaskedDirichlet(td.Distribution):
         # [batch_size, K]
         x = X.rsample(sample_shape)
         # now we mask the Gamma samples from invalid coordinates of lower-dimensional faces
-        x = torch.where(self._mask, x, torch.zeros_like(x))  
+        x = torch.where(self._mask, x, torch.zeros_like(x)) + 1e-9
         # finally, we renormalise the gamma samples
         z = x / x.sum(-1, keepdim=True)
         return z

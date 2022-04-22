@@ -48,7 +48,9 @@ class MaskedDirichlet(td.Distribution):
         if sample_shape is not None:
             sample_shape = torch.Size(sample_shape)
         # X_k | f ~ Gamma(alpha_{f,k}, 1)
-        X = td.Gamma(self._concentration, torch.ones_like(self._concentration), validate_args=False)  
+        ones = torch.ones_like(self._concentration)
+        conc = torch.where(self._mask, self._concentration, ones)
+        X = td.Gamma(conc, ones, validate_args=False)  
         # [batch_size, K]
         x = X.rsample(sample_shape)
         # now we mask the Gamma samples from invalid coordinates of lower-dimensional faces

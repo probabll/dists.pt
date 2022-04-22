@@ -207,8 +207,9 @@ def test_masked_dirichlet(K=3):
         assert torch.isclose(td.kl_divergence(q, p)[i], td.kl_divergence(q_low, p_low)).all(), "The KL divergence does not match that of td.Dirichlet"
 
 
-test_masked_dirichlet(3)
-test_masked_dirichlet(5)
-test_masked_dirichlet(7)
+def __tests():
+    test_masked_dirichlet(3)
+    test_masked_dirichlet(5)
+    test_masked_dirichlet(7)
 
 
